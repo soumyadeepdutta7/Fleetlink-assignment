@@ -5,6 +5,7 @@ import { getDatabase } from '@/lib/mongodb'
 import { calculateRideDuration } from '@/lib/utils'
 import { Vehicle, Booking, BookingRequest } from '@/types'
 import { ObjectId } from 'mongodb'
+import { Filter } from 'mongodb' // ✅ Keep this
 
 export async function POST(request: NextRequest) {
   try {
@@ -79,10 +80,10 @@ export async function POST(request: NextRequest) {
     const vehiclesCollection = db.collection<Vehicle>('vehicles')
     const bookingsCollection = db.collection<Booking>('bookings')
 
-    // ✅ FIX: Query _id as ObjectId, not string
+    // ✅✅✅ FINAL FIX: Double-cast via unknown
     const vehicle = await vehiclesCollection.findOne({
-      _id: new ObjectId(vehicleId), // ← Don't convert to string
-    })
+      _id: new ObjectId(vehicleId),
+    } as unknown as Filter<Vehicle>)
 
     if (!vehicle) {
       return NextResponse.json(
@@ -120,10 +121,10 @@ export async function POST(request: NextRequest) {
 
     const result = await bookingsCollection.insertOne(booking)
 
-    // Retrieve created booking
+    // Retrieve created booking — also double-cast here
     const createdBooking = await bookingsCollection.findOne({
-      _id: result.insertedId, // ← ObjectId, no need to convert
-    })
+      _id: result.insertedId,
+    } as unknown as Filter<Booking>)
 
     // ✅ Convert _id to string before sending to frontend
     if (createdBooking) {
