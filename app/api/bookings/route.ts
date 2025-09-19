@@ -33,8 +33,11 @@ export async function POST(request: NextRequest) {
     const vehiclesCollection = db.collection<Vehicle>('vehicles')
     const bookingsCollection = db.collection<Booking>('bookings')
 
-    // Verify vehicle exists
-    const vehicle = await vehiclesCollection.findOne({ _id: new ObjectId(vehicleId) })
+    // Verify vehicle exists — CONVERT ObjectId to string to match Vehicle._id: string
+    const vehicle = await vehiclesCollection.findOne({ 
+      _id: new ObjectId(vehicleId).toString() // ✅ Fixed: Convert to string
+    })
+    
     if (!vehicle) {
       return NextResponse.json(
         { message: 'Vehicle not found' },
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     // Critical: Re-verify vehicle availability to prevent race conditions
     const conflictingBooking = await bookingsCollection.findOne({
-      vehicleId: vehicleId,
+      vehicleId: vehicleId, // ✅ This is string, matches Booking.vehicleId: string
       $or: [
         // Existing booking starts during our time window
         {
@@ -82,7 +85,11 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await bookingsCollection.insertOne(booking)
-    const createdBooking = await bookingsCollection.findOne({ _id: result.insertedId })
+
+    // Retrieve created booking — CONVERT insertedId ObjectId to string to match Booking._id: string
+    const createdBooking = await bookingsCollection.findOne({ 
+      _id: result.insertedId.toString() // ✅ Fixed: Convert to string
+    })
 
     return NextResponse.json(createdBooking, { status: 201 })
   } catch (error) {
