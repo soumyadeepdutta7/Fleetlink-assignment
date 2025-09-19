@@ -1,18 +1,63 @@
+// app/api/bookings/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getDatabase } from '@/lib/mongodb'
 import { calculateRideDuration } from '@/lib/utils'
-import { Vehicle, Booking } from '@/types'
+import { Vehicle, Booking, BookingRequest } from '@/types'
 import { ObjectId } from 'mongodb'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { vehicleId, customerId, fromPincode, toPincode, startTime: startTimeStr } = body
+    const body: BookingRequest = await request.json()
+    const {
+      vehicleId,
+      customerId,
+      fromPincode,
+      toPincode,
+      startTime: startTimeStr,
+    } = body
 
-    // Validation
+    // === VALIDATION ===
+
     if (!vehicleId || !customerId || !fromPincode || !toPincode || !startTimeStr) {
       return NextResponse.json(
-        { message: 'All fields are required: vehicleId, customerId, fromPincode, toPincode, startTime' },
+        {
+          message:
+            'All fields are required: vehicleId, customerId, fromPincode, toPincode, startTime',
+        },
+        { status: 400 }
+      )
+    }
+
+    // Validate vehicleId is a 24-char hex string (MongoDB ObjectId)
+    if (typeof vehicleId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(vehicleId)) {
+      return NextResponse.json(
+        {
+          message: 'Invalid vehicleId format. Must be a 24-character hexadecimal string.',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (typeof customerId !== 'string' || customerId.trim().length === 0) {
+      return NextResponse.json(
+        {
+          message: 'customerId must be a non-empty string.',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (typeof fromPincode !== 'string' || fromPincode.length !== 6 || isNaN(Number(fromPincode))) {
+      return NextResponse.json(
+        { message: 'fromPincode must be a 6-digit numeric string.' },
+        { status: 400 }
+      )
+    }
+
+    if (typeof toPincode !== 'string' || toPincode.length !== 6 || isNaN(Number(toPincode))) {
+      return NextResponse.json(
+        { message: 'toPincode must be a 6-digit numeric string.' },
         { status: 400 }
       )
     }
@@ -20,12 +65,13 @@ export async function POST(request: NextRequest) {
     const startTime = new Date(startTimeStr)
     if (isNaN(startTime.getTime())) {
       return NextResponse.json(
-        { message: 'Invalid startTime format' },
+        { message: 'Invalid startTime format. Use ISO 8601 (e.g., "2025-04-01T10:00:00Z").' },
         { status: 400 }
       )
     }
 
-    // Calculate booking end time
+    // === BUSINESS LOGIC ===
+
     const estimatedRideDurationHours = calculateRideDuration(fromPincode, toPincode)
     const bookingEndTime = new Date(startTime.getTime() + estimatedRideDurationHours * 60 * 60 * 1000)
 
@@ -33,11 +79,11 @@ export async function POST(request: NextRequest) {
     const vehiclesCollection = db.collection<Vehicle>('vehicles')
     const bookingsCollection = db.collection<Booking>('bookings')
 
-    // Verify vehicle exists — CONVERT ObjectId to string to match Vehicle._id: string
-    const vehicle = await vehiclesCollection.findOne({ 
-      _id: new ObjectId(vehicleId).toString() // ✅ Fixed: Convert to string
+    // ✅ FIX: Query _id as ObjectId, not string
+    const vehicle = await vehiclesCollection.findOne({
+      _id: new ObjectId(vehicleId), // ← Don't convert to string
     })
-    
+
     if (!vehicle) {
       return NextResponse.json(
         { message: 'Vehicle not found' },
@@ -45,24 +91,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Critical: Re-verify vehicle availability to prevent race conditions
     const conflictingBooking = await bookingsCollection.findOne({
-      vehicleId: vehicleId, // ✅ This is string, matches Booking.vehicleId: string
+      vehicleId, // ← string, matches Booking.vehicleId: string
       $or: [
-        // Existing booking starts during our time window
-        {
-          startTime: { $gte: startTime, $lt: bookingEndTime }
-        },
-        // Existing booking ends during our time window
-        {
-          endTime: { $gt: startTime, $lte: bookingEndTime }
-        },
-        // Existing booking completely encompasses our time window
-        {
-          startTime: { $lte: startTime },
-          endTime: { $gte: bookingEndTime }
-        }
-      ]
+        { startTime: { $gte: startTime, $lt: bookingEndTime } },
+        { endTime: { $gt: startTime, $lte: bookingEndTime } },
+        { startTime: { $lte: startTime }, endTime: { $gte: bookingEndTime } },
+      ],
     })
 
     if (conflictingBooking) {
@@ -72,7 +107,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create the booking
     const booking: Booking = {
       vehicleId,
       customerId,
@@ -86,10 +120,15 @@ export async function POST(request: NextRequest) {
 
     const result = await bookingsCollection.insertOne(booking)
 
-    // Retrieve created booking — CONVERT insertedId ObjectId to string to match Booking._id: string
-    const createdBooking = await bookingsCollection.findOne({ 
-      _id: result.insertedId.toString() // ✅ Fixed: Convert to string
+    // Retrieve created booking
+    const createdBooking = await bookingsCollection.findOne({
+      _id: result.insertedId, // ← ObjectId, no need to convert
     })
+
+    // ✅ Convert _id to string before sending to frontend
+    if (createdBooking) {
+      createdBooking._id = createdBooking._id!.toString()
+    }
 
     return NextResponse.json(createdBooking, { status: 201 })
   } catch (error) {

@@ -1,3 +1,5 @@
+// app/api/vehicles/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getDatabase } from '@/lib/mongodb'
 import { Vehicle } from '@/types'
@@ -7,7 +9,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { name, capacityKg, tyres } = body
 
-    // Validation
     if (!name || typeof name !== 'string') {
       return NextResponse.json(
         { message: 'Name is required and must be a string' },
@@ -41,6 +42,11 @@ export async function POST(request: NextRequest) {
 
     const result = await vehiclesCollection.insertOne(vehicle)
     const createdVehicle = await vehiclesCollection.findOne({ _id: result.insertedId })
+
+    // ✅ Explicitly convert to string for consistent API response
+    if (createdVehicle) {
+      createdVehicle._id = createdVehicle._id!.toString()
+    }
 
     return NextResponse.json(createdVehicle, { status: 201 })
   } catch (error) {

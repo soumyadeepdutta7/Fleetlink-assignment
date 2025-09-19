@@ -1,7 +1,10 @@
+// app/api/vehicles/available/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getDatabase } from '@/lib/mongodb'
 import { calculateRideDuration } from '@/lib/utils'
 import { Vehicle, Booking, AvailableVehicle } from '@/types'
+import { ObjectId } from 'mongodb'
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,7 +14,6 @@ export async function GET(request: NextRequest) {
     const toPincode = searchParams.get('toPincode')
     const startTimeStr = searchParams.get('startTime')
 
-    // Validation
     if (!capacityRequired || capacityRequired <= 0) {
       return NextResponse.json(
         { message: 'Valid capacityRequired is required' },
@@ -41,7 +43,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Calculate estimated ride duration
     const estimatedRideDurationHours = calculateRideDuration(fromPincode, toPincode)
     const endTime = new Date(startTime.getTime() + estimatedRideDurationHours * 60 * 60 * 1000)
 
@@ -49,7 +50,6 @@ export async function GET(request: NextRequest) {
     const vehiclesCollection = db.collection<Vehicle>('vehicles')
     const bookingsCollection = db.collection<Booking>('bookings')
 
-    // Find vehicles with sufficient capacity
     const suitableVehicles = await vehiclesCollection
       .find({ capacityKg: { $gte: capacityRequired } })
       .toArray()
@@ -58,24 +58,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([])
     }
 
-    // Get vehicle IDs that have conflicting bookings
     const conflictingBookings = await bookingsCollection
       .find({
         vehicleId: { $in: suitableVehicles.map(v => v._id!.toString()) },
         $or: [
-          // Booking starts during our time window
-          {
-            startTime: { $gte: startTime, $lt: endTime }
-          },
-          // Booking ends during our time window
-          {
-            endTime: { $gt: startTime, $lte: endTime }
-          },
-          // Booking completely encompasses our time window
-          {
-            startTime: { $lte: startTime },
-            endTime: { $gte: endTime }
-          }
+          { startTime: { $gte: startTime, $lt: endTime } },
+          { endTime: { $gt: startTime, $lte: endTime } },
+          { startTime: { $lte: startTime }, endTime: { $gte: endTime } },
         ]
       })
       .toArray()
@@ -84,11 +73,12 @@ export async function GET(request: NextRequest) {
       conflictingBookings.map(booking => booking.vehicleId)
     )
 
-    // Filter out vehicles with conflicts
+    // ✅ FIX: Explicitly convert _id to string
     const availableVehicles: AvailableVehicle[] = suitableVehicles
       .filter(vehicle => !conflictingVehicleIds.has(vehicle._id!.toString()))
       .map(vehicle => ({
         ...vehicle,
+        _id: vehicle._id!.toString(), // ← Critical fix
         estimatedRideDurationHours
       }))
 
