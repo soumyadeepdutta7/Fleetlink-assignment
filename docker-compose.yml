@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: fleetlink-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: fleetlink
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - fleetlink-network
+
+  # Next.js Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fleetlink-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/fleetlink
+      - NEXT_PUBLIC_API_URL=http://localhost:3000
+    depends_on:
+      - mongodb
+    networks:
+      - fleetlink-network
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  mongodb_data:
+
+networks:
+  fleetlink-network:
+    driver: bridge
